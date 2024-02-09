@@ -141,15 +141,6 @@ public interface Subscription {
 
 ![asyncronous.png](images%2Fasyncronous.png)
 
-#### back pressure
-
-publisher 가 생성한 것을 subscriber 가 충분히 처리하지 못할 때 불균형 처리 가능
-
-subscriber 가 역으로 데이터 제어
-
-해당 스레드가 블록킹을 하게 되면 다른 것을 못함 -> 성능에 영향을 미침
-
-request method 를 논블록킹 방식으로 동작 -> 이를 통틀어 논블록킹 백프레셔라고 불리게 됨
 
 ## 마블 다이어그램 (Marble Diagram)
 
@@ -214,6 +205,41 @@ Jobs
 ```
 
 > https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Mono.html#concatWith-org.reactivestreams.Publisher-
+
+```java
+public class Example {
+    public static void main(String[] args) {
+        Flux.concat( // 1
+                Flux.just("Mercury", "Venus", "Earth"),
+                Flux.just("Mars", "Jupiter", "Saturn"),
+                Flux.just("Uranus", "Neptune", "Pluto"))
+            .collectList() // 2
+            .subscribe(planets -> System.out.println(planets)); // 3
+    }
+}
+```
+
+위 코드 기준으로
+
+* 1 에서 반환되는 Publisher ([concat](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html#concat-org.reactivestreams.Publisher...-)) - Flux
+* 2 에서 반환되는 Publisher ([collectList](https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html#collectList--)) - Mono
+* 3 에서의 결과
+  * `[Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune, Pluto]`
+
+## Cold / Hot Sequence
+
+* Cold - 무언가를 새로 시작
+* Hot - 무언가를 새로 시작하지 않음
+
+## Back Pressure
+
+publisher 가 생성한 것을 subscriber 가 충분히 처리하지 못할 때 불균형 처리 가능
+
+subscriber 가 역으로 데이터 제어
+
+해당 스레드가 블록킹을 하게 되면 다른 것을 못함 -> 성능에 영향을 미침
+
+request method 를 논블록킹 방식으로 동작 -> 이를 통틀어 논블록킹 백프레셔라고 불리게 됨
 
 # References
 * 스프링으로 시작하는 리액티브 프로그래밍 - 황정식 저
