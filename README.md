@@ -151,6 +151,70 @@ subscriber 가 역으로 데이터 제어
 
 request method 를 논블록킹 방식으로 동작 -> 이를 통틀어 논블록킹 백프레셔라고 불리게 됨
 
+## 마블 다이어그램 (Marble Diagram)
+
+여러 가지 구슬 모양의 도형으로 구성된 도표. Reactor 에서 지원하는 Operator 를 이해하는 데 중요한 역할을 한다.
+
+### 예시
+
+![mapForFlux.svg](images%2FmapForFlux.svg)
+
+위 다이어그램은 `map` operator
+
+* 상/하단의 기다란 가로 줄
+  * 타임라인 (왼쪽에서 오른쪽으로 시간이 흐름)
+  * 상단 - 시간순으로 데이터가 Emit
+  * 하단 - emit 된 데이터가 함수를 거쳐 변환됨
+    * Operator 의 출력으로 반환된 Flux 의 경우, Output Flux 라고도 불림
+* 가운데 커다란 하얀색 박스
+  * Publisher 로부터 전달받은 데이터를 처리하는 Operator 함수
+* 초록색, 노란색, 파란색 도형
+  * 동그라미 - Publisher 가 emit 하는 데이터
+  * 사각형 - 함수(operator)의 출력으로 나온 변환된 데이터
+* 상/하단의 점선 화살표
+  * 상단 - 함수의 입력으로 들어감
+  * 하단 - 함수의 출력으로 나옴
+* 상/하단의 기다란 줄 맨 오른쪽에 있는 세로 선
+  * 데이터 emit 이 정상적으로 끝났음을 의미
+  * onComplete signal emit 을 의미
+
+> https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Flux.html#map-java.util.function.Function-
+
+![mono.svg](images%2Fmono.svg)
+
+위 다이어그램은 `Mono`
+
+* 하단의 X
+  * 에러가 발생해 비정상적으로 데이터 처리가 종료되었음을 의미
+  * onError signal emit 을 의미
+
+> https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Mono.html#Mono--
+
+![concatWithForMono.svg](images%2FconcatWithForMono.svg)
+
+위 다이어그램은 `concatWith` operator
+
+* `concatWith` 의 위쪽에 있는 Publisher 의 데이터 소스와 `concatWith` 내부에 있는 Publisher 데이터 소스를 연결
+* 이는 새로운 Flux 의 데이터 소스가 되어 emit
+
+```java
+public class Example {
+    public static void main(String[] args) {
+        Flux<String> flux = 
+                Mono.justOrEmpty("Steve")
+                        .concatWith(Mono.justOrEmpty("Jobs"));
+        flux.subscribe(System.out::println);
+    }
+}
+```
+
+```
+Steve
+Jobs
+```
+
+> https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Mono.html#concatWith-org.reactivestreams.Publisher-
+
 # References
 * 스프링으로 시작하는 리액티브 프로그래밍 - 황정식 저
 * 패스트캠퍼스 - Reactor
