@@ -1,4 +1,4 @@
-package kr.pe.karsei;
+package kr.pe.karsei.reactorprac;
 
 import reactor.core.publisher.Flux;
 
