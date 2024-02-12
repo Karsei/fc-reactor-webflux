@@ -235,11 +235,169 @@ public class Example {
 
 publisher 가 생성한 것을 subscriber 가 충분히 처리하지 못할 때 불균형 처리 가능
 
-subscriber 가 역으로 데이터 제어
+### 처리 방식
 
-해당 스레드가 블록킹을 하게 되면 다른 것을 못함 -> 성능에 영향을 미침
+#### 데이터 개수 제어
 
-request method 를 논블록킹 방식으로 동작 -> 이를 통틀어 논블록킹 백프레셔라고 불리게 됨
+데이터의 요청 개수를 직접적으로 제어할 필요가 있다면 `BaseSubscriber` 인터페이스를 사용하여 데이터 요청 개수를 적절하게 제어 가능
+
+```java
+public class Example {
+    public static void main(String[] args) {
+        Flux
+                .range(1, 5)
+                .doOnRequest(value -> log.info("# doOnRequest: {}", value))
+                // Subscriber가 적절히 처리할 수 있는 수준의 데이터 개수를 Publisher에게 요청
+                .subscribe(new BaseSubscriber<>() {
+                    @Override
+                    // 구독 시점에 최초 데이터 요청 개수 제어하는 역할
+                    protected void hookOnSubscribe(Subscription subscription) {
+                        request(1);
+                    }
+
+                    @SneakyThrows
+                    @Override
+                    // Publisher가 emit 한 데이터를 전달받아 처리한 후 Publisher에게 또 다시 데이터를 요청하는 역할 
+                    protected void hookOnNext(Integer value) {
+                        Thread.sleep(2000L);
+                        log.info("# hookOnNext: {}", value);
+                        request(1);
+                    }
+                });
+    }
+}
+```
+
+#### Backpressure 전략 사용
+
+* IGNORE - Backpressure 적용 X
+* ERROR - Exception 발생
+* DROP - 버퍼 밖에서 대기하는 먼저 Emit 된 데이터부터 DROP
+* LATEST - 버퍼 밖에서 대기하는 가장 최근에 emit 된 데이터부터 버퍼에 채움
+  * 새로운 데이터가 들어오는 시점에 가장 최근의 데이터만 남겨 두고 나머지 데이터를 폐기
+* BUFFER - 버퍼 안에 있는 데이터부터 DROP
+  * DROP_LATEST - 가장 최근에 버퍼 안에 채워진 데이터를 DROP 후, 확보된 공간에 emit 된 데이터를 채움
+  * DROP_OLDEST - 버퍼 안에 채워진 데이터 중에서 가장 오래된 데이터를 DROP 하여 폐기한 후, 확보된 공간에 emit 된 데이터를 채움
+
+```java
+// ERROR 전략 예시
+public class Example {
+    public static void main(String[] args) {
+        Flux
+                // 1씩 증가하면서 0.001초에 한 번씩 증가하도록 설정
+                .interval(Duration.ofMillis(1L))
+                // ERROR 전략 사용 - Exception 발생 시킴
+                .onBackpressureError()
+                // Publisher가 emit한 데이터 확인
+                .doOnNext(data -> log.info("# doOnNext: {}", data))
+                // 별도의 스레드로 진행
+                .publishOn(Schedulers.parallel())
+                // Subscriber 에서 0.005초 마다 처리하도록 하여 일부러 느리게 작동되도록 설정
+                // onError 로그에서 The receiver is overrun by more signals than expected (bounded queue...) 가 등장
+                .subscribe(data -> {
+                  try {
+                    Thread.sleep(Duration.ofMillis(5L));
+                  } catch (InterruptedException ignored) {}
+                  log.info("# onNext: {}", data);
+                }, throwable -> log.error("# onError: {}", throwable.getMessage()));
+  
+        Thread.sleep(2000L);
+    }
+}
+```
+
+```
+22:27:04.480 [parallel-2] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # doOnNext: 0
+22:27:04.484 [parallel-2] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # doOnNext: 1
+22:27:04.484 [parallel-2] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # doOnNext: 2
+...
+22:27:06.048 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 254
+22:27:06.054 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 255
+22:27:06.054 [parallel-1] ERROR kr.pe.karsei.reactorprac.BackPressureTest -- # onError: The receiver is overrun by more signals than expected (bounded queue...)
+```
+
+```java
+// DROP 전략 예시
+public class Example {
+    public static void main(String[] args) {
+        Flux
+                // 1씩 증가하면서 0.001초에 한 번씩 증가하도록 설정
+                .interval(Duration.ofMillis(1L))
+                // DROP 전략 사용 - 버퍼 밖에서 대기 중인 먼저 emit 된 데이터부터 DROP
+                .onBackpressureDrop(dropped -> log.info("# dropped: {}", dropped))
+                // 별도의 스레드로 진행
+                .publishOn(Schedulers.parallel())
+                // Subscriber 에서 0.005초 마다 처리하도록 하여 일부러 느리게 작동되도록 설정
+                // 버퍼 밖에서 대기 중인 데이터 중에서 먼저 emit 된 데이터부터 drop 됨
+                .subscribe(data -> {
+                  try {
+                    Thread.sleep(Duration.ofMillis(5L));
+                  } catch (InterruptedException ignored) {}
+                  log.info("# onNext: {}", data);
+                }, throwable -> log.error("# onError: {}", throwable.getMessage()));
+  
+        Thread.sleep(2000L);
+    }
+}
+```
+
+```
+22:23:20.608 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 0
+22:23:20.619 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 1
+22:23:20.625 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 2
+...
+22:23:20.847 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 37
+22:23:20.855 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 38
+22:23:20.856 [parallel-2] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # dropped: 256
+22:23:20.857 [parallel-2] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # dropped: 257
+...
+22:23:22.178 [parallel-2] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # dropped: 1577
+22:23:22.178 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 255
+22:23:22.180 [parallel-2] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # dropped: 1578
+22:23:22.180 [parallel-2] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # dropped: 1579
+22:23:22.181 [parallel-2] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # dropped: 1580
+22:23:22.183 [parallel-2] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # dropped: 1581
+22:23:22.183 [parallel-2] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # dropped: 1582
+22:23:22.184 [parallel-2] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # dropped: 1583
+22:23:22.184 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 1196 // dropped 된 데이터 건너뜀
+22:23:22.185 [parallel-2] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # dropped: 1584
+```
+
+```java
+// LATEST 전략 예시
+public class Example {
+    public static void main(String[] args) {
+        Flux
+                // 1씩 증가하면서 0.001초에 한 번씩 증가하도록 설정
+                .interval(Duration.ofMillis(1L))
+                // LATEST 전략 사용 - 버퍼 밖에서 대기하는 가장 최근에 emit 된 데이터부터 버퍼에 채움
+                .onBackpressureLatest()
+                // 별도의 스레드로 진행
+                .publishOn(Schedulers.parallel())
+                // Subscriber 에서 0.005초 마다 처리하도록 하여 일부러 느리게 작동되도록 설정
+                // 데이터가 들어올 때마다 이전에 유지하고 있던 데이터가 폐기됨
+                .subscribe(data -> {
+                  try {
+                    Thread.sleep(Duration.ofMillis(5L));
+                  } catch (InterruptedException ignored) {}
+                  log.info("# onNext: {}", data);
+                }, throwable -> log.error("# onError: {}", throwable.getMessage()));
+  
+        Thread.sleep(2000L);
+    }
+}
+```
+
+```
+22:29:16.543 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 0
+22:29:16.552 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 1
+22:29:16.557 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 2
+...
+22:29:18.127 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 254
+22:29:18.133 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 255
+22:29:18.139 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 1196
+22:29:18.145 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 1197
+```
 
 # References
 * 스프링으로 시작하는 리액티브 프로그래밍 - 황정식 저
