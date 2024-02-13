@@ -399,6 +399,196 @@ public class Example {
 22:29:18.145 [parallel-1] INFO kr.pe.karsei.reactorprac.BackPressureTest -- # onNext: 1197
 ```
 
+## Sink
+
+Processor(Publisher 와 Subscriber 의 기능을 모두 지님)의 기능을 개선한 것
+
+"Reactive Streams 의 Signal 을 프로그래밍 방식으로 Push 할 수 있는 구조이며 Flux 또는 Mono 의 의미 체계를 가진다."
+
+> Sinks are constructs through which Reactive Streams signals can be programmatically pushed, with Flux or Mono semantics.
+
+> https://projectreactor.io/docs/core/release/api/reactor/core/publisher/Sinks.html
+ 
+즉, Flux 또는 Mono 가 `onNext` 같은 signal 을 내부적으로 전송해주는 방식으로 제공한다면, Sinks 를 사용하면 프로그래밍 코드를 통해 명시적으로 Signal 을 전송할 수 있음
+
+* Operator(`generate()`, `create()`) 는 싱글스레드 기반에서 Signal 전송을 하는 반면에, Sinks 는 멀티스레드 방식으로 Signal 전송
+  * 스레드 안전성 보장함
+
+```java
+public class SinksTest {
+    @SneakyThrows
+    @Test
+    void createOperator() {
+        Flux
+                .create((ThrowingConsumer<FluxSink<String>>) fluxSink -> IntStream
+                        .range(1, 6)
+                        .forEach(n -> fluxSink.next(doTasks(n))))
+                .subscribeOn(Schedulers.boundedElastic())
+                .doOnNext(n -> log.info("# create(): {}", n))
+                
+                .publishOn(Schedulers.parallel())
+                .map(result -> result + " success!")
+                .doOnNext(n -> log.info("# map(): {}", n))
+                
+                .publishOn(Schedulers.parallel())
+                .subscribe(data -> log.info("# onNext: {}", data));
+
+        Thread.sleep(500L);
+    }
+
+    private String doTasks(int taskNumber) {
+        return "task " + taskNumber + " result";
+    }
+}
+```
+
+```
+22:54:26.523 [boundedElastic-1] INFO kr.pe.karsei.reactorprac.SinksTest -- # create(): task 1 result
+22:54:26.526 [boundedElastic-1] INFO kr.pe.karsei.reactorprac.SinksTest -- # create(): task 2 result
+22:54:26.526 [parallel-2] INFO kr.pe.karsei.reactorprac.SinksTest -- # map(): task 1 result success!
+22:54:26.526 [boundedElastic-1] INFO kr.pe.karsei.reactorprac.SinksTest -- # create(): task 3 result
+22:54:26.526 [parallel-1] INFO kr.pe.karsei.reactorprac.SinksTest -- # onNext: task 1 result success!
+22:54:26.526 [parallel-2] INFO kr.pe.karsei.reactorprac.SinksTest -- # map(): task 2 result success!
+```
+
+위 결과를 보면 총 3개의 스레드가 실행되고 있는 것을 알 수 있고, `create()` 메서드를 통해 doTask() 메서드를 실행함으로써 Signal 을 전달하고 있는 것을 알 수 있다.
+
+```java
+public class SinksTest {
+    @SneakyThrows
+    @Test
+    void unicastSink() {
+        Sinks.Many<String> unicastSink = Sinks.many().unicast().onBackpressureBuffer();
+        Flux<String> sinkFlux = unicastSink.asFlux();
+
+        IntStream
+                .range(1, 6)
+                .forEach(n -> {
+                    try {
+                        new Thread(() -> {
+                            unicastSink.emitNext(doTasks(n), Sinks.EmitFailureHandler.FAIL_FAST);
+                            log.info("# emitted: {}", n);
+                        }).start();
+                        Thread.sleep(100L);
+                    } catch (InterruptedException e) {
+                        log.error(e.getMessage());
+                    }
+                });
+
+        sinkFlux
+                .publishOn(Schedulers.parallel())
+                .map(result -> result + " success!")
+                .doOnNext(n -> log.info("# map(): {}", n))
+                
+                .publishOn(Schedulers.parallel())
+                .subscribe(data -> log.info("# onNext: {}", data))
+                ;
+
+        Thread.sleep(200L);
+    }
+
+    private String doTasks(int taskNumber) {
+        return "task " + taskNumber + " result";
+    }
+}
+```
+
+```
+23:02:09.114 [Thread-3] INFO kr.pe.karsei.reactorprac.SinksTest -- # emitted: 1
+23:02:09.211 [Thread-4] INFO kr.pe.karsei.reactorprac.SinksTest -- # emitted: 2
+23:02:09.313 [Thread-5] INFO kr.pe.karsei.reactorprac.SinksTest -- # emitted: 3
+23:02:09.415 [Thread-6] INFO kr.pe.karsei.reactorprac.SinksTest -- # emitted: 4
+23:02:09.517 [Thread-7] INFO kr.pe.karsei.reactorprac.SinksTest -- # emitted: 5
+23:02:09.652 [parallel-2] INFO kr.pe.karsei.reactorprac.SinksTest -- # map(): task 1 result success!
+23:02:09.652 [parallel-2] INFO kr.pe.karsei.reactorprac.SinksTest -- # map(): task 2 result success!
+23:02:09.652 [parallel-1] INFO kr.pe.karsei.reactorprac.SinksTest -- # onNext: task 1 result success!
+23:02:09.652 [parallel-2] INFO kr.pe.karsei.reactorprac.SinksTest -- # map(): task 3 result success!
+23:02:09.652 [parallel-1] INFO kr.pe.karsei.reactorprac.SinksTest -- # onNext: task 2 result success!
+23:02:09.652 [parallel-2] INFO kr.pe.karsei.reactorprac.SinksTest -- # map(): task 4 result success!
+23:02:09.652 [parallel-1] INFO kr.pe.karsei.reactorprac.SinksTest -- # onNext: task 3 result success!
+23:02:09.652 [parallel-2] INFO kr.pe.karsei.reactorprac.SinksTest -- # map(): task 5 result success!
+23:02:09.652 [parallel-1] INFO kr.pe.karsei.reactorprac.SinksTest -- # onNext: task 4 result success!
+23:02:09.652 [parallel-1] INFO kr.pe.karsei.reactorprac.SinksTest -- # onNext: task 5 result success!
+```
+
+위 로그를 보면 총 7개의 스레드가 실행된 것을 확인할 수 있고, 루프를 돌 때마다 새로운 스레드가 생성되어 여러 개의 스레드에서도 사용이 가능하다. 스레드 안전성을 보장받을 수 있는 장점이 있음
+
+### Sinks.One
+
+한 건의 데이터를 전송하는 방법을 정의해 둔 기능 명세
+
+```java
+public class SinksTest {
+    @Test
+    void sinkOne() {
+        Sinks.One<String> sinkOne = Sinks.one();
+        Mono<String> mono = sinkOne.asMono();
+    
+        sinkOne.emitValue("Hello Reactor", Sinks.EmitFailureHandler.FAIL_FAST);
+        // sinkOne.emitValue("Hi Reactor", Sinks.EmitFailureHandler.FAIL_FAST);
+    
+        mono.subscribe(data -> log.info("# subscriber1 : {}", data));
+        mono.subscribe(data -> log.info("# subscriber2 : {}", data));
+    }
+}
+```
+
+```
+23:08:44.304 [Test worker] INFO kr.pe.karsei.reactorprac.SinksTest -- # subscriber1 : Hello Reactor
+23:08:44.309 [Test worker] INFO kr.pe.karsei.reactorprac.SinksTest -- # subscriber2 : Hello Reactor
+```
+
+위에서 주석을 해제해도 똑같은 결과가 나온다. 아무리 많은 수의 데이터를 emit 한다 하더라도 **처음 emit 한 데이터는 정상적으로 emit 되지만 나머지 데이터들은 drop 된다.**
+
+### Sinks.Many
+
+여러 건의 데이터를 여러 가지 방식으로 전송하는 기능을 정의해 둔 기능 명세
+
+* broadcast - 네트워크에 연결된 모든 시스템이 정보를 전달받는 방식 (One to All)
+* unicast - 하나의 특정 시스템만 정보를 전달받는 방식 (One to One)
+* multicast - 일부 시스템들만 정보를 전달받는 방식 (One to Many)
+
+```java
+public class SinksTest {
+    @Test
+    void sinkMany() {
+        Sinks.Many<Integer> unicastSink = Sinks.many().unicast().onBackpressureBuffer();
+        Flux<Integer> sinkFlux = unicastSink.asFlux();
+    
+        unicastSink.emitNext(1, Sinks.EmitFailureHandler.FAIL_FAST);
+        unicastSink.emitNext(2, Sinks.EmitFailureHandler.FAIL_FAST);
+    
+        sinkFlux.subscribe(data -> log.info("# subscriber1 : {}", data));
+        unicastSink.emitNext(3, Sinks.EmitFailureHandler.FAIL_FAST);
+        // sinkFlux.subscribe(data -> log.info("# subscriber2 : {}", data));
+    }
+}
+```
+
+```
+23:19:34.472 [Test worker] INFO kr.pe.karsei.reactorprac.SinksTest -- # subscriber1 : 1
+23:19:34.476 [Test worker] INFO kr.pe.karsei.reactorprac.SinksTest -- # subscriber1 : 2
+23:19:34.476 [Test worker] INFO kr.pe.karsei.reactorprac.SinksTest -- # subscriber1 : 3
+```
+
+만약 위에 있는 주석을 풀면 아래와 같이 나타난다.
+
+```
+23:22:06.563 [Test worker] INFO kr.pe.karsei.reactorprac.SinksTest -- # subscriber1 : 1
+23:22:06.566 [Test worker] INFO kr.pe.karsei.reactorprac.SinksTest -- # subscriber1 : 2
+23:22:06.566 [Test worker] INFO kr.pe.karsei.reactorprac.SinksTest -- # subscriber1 : 3
+23:22:06.567 [Test worker] ERROR reactor.core.publisher.Operators -- Operator called default onErrorDropped
+reactor.core.Exceptions$ErrorCallbackNotImplemented: java.lang.IllegalStateException: Sinks.many().unicast() sinks only allow a single Subscriber
+Caused by: java.lang.IllegalStateException: Sinks.many().unicast() sinks only allow a single Subscriber
+	at reactor.core.publisher.SinkManyUnicast.subscribe(SinkManyUnicast.java:426)
+```
+
+위처럼 오류가 나타나는 이유는 `UnicastSpec` 의 기능이 단 하나의 Subscriber 에게만 데이터를 Emit 하는 것이기 때문에 두 번째 Subscriber 에게는 허용하지 않기 때문이다.
+
+만약 위 코드에서 `unicast` 를 `multicast` 로 변경하면 제대로 작동된다.
+
+Sinks 가 Publisher 의 역할을 할 경우 기본적으로 **Hot** Publisher 로 동작한다. (특히, `onBackpressureBuffer` 메서드는 Warm Up 의 특징을 가지는 Hot Sequence 로 동작한다)
+
 # References
 * 스프링으로 시작하는 리액티브 프로그래밍 - 황정식 저
 * 패스트캠퍼스 - Reactor
