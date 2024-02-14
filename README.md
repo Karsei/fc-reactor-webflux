@@ -589,6 +589,307 @@ Caused by: java.lang.IllegalStateException: Sinks.many().unicast() sinks only al
 
 Sinks 가 Publisher 의 역할을 할 경우 기본적으로 **Hot** Publisher 로 동작한다. (특히, `onBackpressureBuffer` 메서드는 Warm Up 의 특징을 가지는 Hot Sequence 로 동작한다)
 
+## Scheduler
+
+Reactor Sequence 에서 **스레드를 관리해 주는 관리자 역할**
+
+운영체제의 Scheduler 의 의미와 비슷하고 Scheduler 를 사용하여 어떤 스레드에서 무엇을 처리할지 제어
+
+Scheduler 를 사용하면 코드 자체가 매우 간결해지고, Scheduler 가 스레드의 제어를 대신 해주므로 개발자 부담 감소
+
+### Operator
+
+#### subscribeOn()
+
+구독이 발생한 직후 실행될 스레드를 지정
+
+원본 Publisher 의 동작을 수행하기 위한 스레드라고 볼 수 있음
+
+```java
+public class SchedulerTest {
+    @SneakyThrows
+    @Test
+    void subscribeOn() {
+        Flux
+                .fromArray(new Integer[] {1, 3, 5, 7})
+                .subscribeOn(Schedulers.boundedElastic())
+                .doOnNext(data -> log.info("# doOnNext: {}", data))
+                // 구독 시점의 스레드는 메인 스레드에서 진행됨
+                .doOnSubscribe(subscription -> log.info("# doOnSubscribe"))
+                .subscribe(data -> log.info("# onNext: {}", data));
+
+        Thread.sleep(500L);
+    }
+}
+```
+
+```
+22:52:34.440 [Test worker] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # doOnSubscribe
+22:52:34.444 [boundedElastic-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # doOnNext: 1
+22:52:34.445 [boundedElastic-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 1
+22:52:34.445 [boundedElastic-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # doOnNext: 3
+22:52:34.445 [boundedElastic-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 3
+...
+```
+
+위 코드에서 subscribeOn() 을 추가하지 않으면 여전히 메인 스레드에서 진행됨
+
+#### publishOn()
+
+코드 상에서 publishOn 을 기준으로 아래쪽인 Downstream 의 실행 스레드를 변경
+
+operator 체인 상에서 한 개 이상을 사용할 수 있음
+
+```java
+public class SchedulerTest {
+    @SneakyThrows
+    @Test
+    void publishOn() {
+        Flux
+                .fromArray(new Integer[] {1, 3, 5, 7})
+                .doOnNext(data -> log.info("# doOnNext: {}", data))
+                .doOnSubscribe(subscription -> log.info("# doOnSubscribe"))
+                .publishOn(Schedulers.parallel())
+                .subscribe(data -> log.info("# onNext: {}", data));
+    
+        Thread.sleep(500L);
+    }
+}
+```
+
+```
+22:55:25.547 [Test worker] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # doOnSubscribe
+22:55:25.553 [Test worker] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # doOnNext: 1
+22:55:25.554 [Test worker] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # doOnNext: 3
+22:55:25.554 [parallel-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 1
+22:55:25.554 [Test worker] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # doOnNext: 5
+22:55:25.554 [parallel-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 3
+22:55:25.554 [Test worker] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # doOnNext: 7
+22:55:25.554 [parallel-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 5
+22:55:25.554 [parallel-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 7
+```
+
+#### parallel()
+
+라운드 로빈 방식으로 CPU 코어(논리 코어, 물리 스레드) 개수만큼의 스레드를 병렬로 실행
+
+```java
+public class SchedulerTest {
+    @SneakyThrows
+    @Test
+    void parallel() {
+        Flux
+                .fromArray(new Integer[] {1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23})
+                .parallel()
+                //.parallel(4)
+                .runOn(Schedulers.parallel())
+                .subscribe(data -> log.info("# onNext: {}", data));
+    
+        Thread.sleep(100L);
+    }
+}
+```
+
+실습을 진행하는 컴퓨터 사양의 논리 프로세서의 개수가 12이므로 12개의 스레드가 생성되어 병렬로 진행됨
+
+![parallel_for_pc_threads.png](images%2Fparallel_for_pc_threads.png)
+
+```
+22:58:18.624 [parallel-10] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 19
+22:58:18.624 [parallel-2] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 3
+22:58:18.624 [parallel-7] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 13
+22:58:18.624 [parallel-3] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 5
+22:58:18.624 [parallel-11] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 21
+22:58:18.624 [parallel-4] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 7
+22:58:18.624 [parallel-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 1
+22:58:18.624 [parallel-5] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 9
+22:58:18.624 [parallel-8] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 15
+22:58:18.624 [parallel-12] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 23
+22:58:18.624 [parallel-9] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 17
+22:58:18.624 [parallel-6] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 11
+```
+
+만약 일부의 스레드 개수만 사용하고 싶다면, 주석처럼 숫자를 지정하면 해당 개수 만큼의 스레드가 병렬로 실행됨
+
+```
+23:01:21.458 [parallel-2] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 3
+23:01:21.458 [parallel-4] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 7
+23:01:21.458 [parallel-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 1
+23:01:21.461 [parallel-4] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 15
+23:01:21.458 [parallel-3] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 5
+23:01:21.461 [parallel-2] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 11
+23:01:21.461 [parallel-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 9
+23:01:21.462 [parallel-4] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 23
+23:01:21.462 [parallel-3] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 13
+23:01:21.462 [parallel-3] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 21
+23:01:21.462 [parallel-2] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 19
+23:01:21.462 [parallel-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 17
+```
+
+### publishOn, subscribeOn 을 같이 사용하면?
+
+* publishOn 은 한 개 이상 사용할 수 있으며, 실행 스레드를 목적에 맞게 적절하게 분리할 수 있음
+* subscribeOn 은 operator 체인 상에서 어떤 위치에 있든 간에 구독 시점 직후, 즉 Publisher 가 데이터를 emit 하기 전에 실행 스레드를 변경
+
+위 두 개를 함께 사용해서 원본 Publisher 에서 데이터를 emit 하는 스레드와 emit 된 데이터를 가공 처리하는 스레드를 적절하게 분리할 수 있음
+
+### Scheduler 종류
+
+#### Schedulers.immediate()
+
+별도의 스레드를 추가적으로 생성하지 않고, 현재 스레드에서 작업을 처리하고자 할 때 사용
+
+```java
+@Slf4j
+public class SchedulerTest {
+    @SneakyThrows
+    @Test
+    void immediate() {
+        Flux
+                .fromArray(new Integer[] {1, 3, 5, 7})
+                .publishOn(Schedulers.parallel())
+                .filter(data -> data > 3)
+                .doOnNext(data -> log.info("# doOnNext filter: {}", data))
+
+                .publishOn(Schedulers.immediate())
+                .map(data -> data * 10)
+                .doOnNext(data -> log.info("# doOnNext map: {}", data))
+                .subscribe(data -> log.info("# onNext: {}", data));
+
+        Thread.sleep(200L);
+    }
+}
+```
+
+```
+23:08:42.306 [parallel-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # doOnNext filter: 5
+23:08:42.310 [parallel-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # doOnNext map: 50
+23:08:42.310 [parallel-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 50
+23:08:42.311 [parallel-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # doOnNext filter: 7
+23:08:42.311 [parallel-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # doOnNext map: 70
+23:08:42.311 [parallel-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 70
+```
+
+Scheduler 가 필요한 경우가 있긴 한데, 별도의 스레드를 추가 할당하고 싶지 않을 경우에 사용된다.
+
+#### Schedulers.single()
+
+스레드 하나만 생성해서 Scheduler 가 제거되기 전까지 재사용하는 방식
+
+```java
+@Slf4j
+public class SchedulerTest {
+    @SneakyThrows
+    @Test
+    void schedulerSingle() {
+        doTask("task1")
+                .subscribe(data -> log.info("# onNext: {}", data));
+        doTask("task2")
+                .subscribe(data -> log.info("# onNext: {}", data));
+
+        Thread.sleep(200L);
+    }
+
+    private static Flux<Integer> doTask(String taskName) {
+        return Flux
+                .fromArray(new Integer[]{1, 3, 5, 7})
+                .publishOn(Schedulers.single())
+                .filter(data -> data > 3)
+                .doOnNext(data -> log.info("# {} doOnNext filter: {}", taskName, data))
+                .map(data -> data * 10)
+                .doOnNext(data -> log.info("# {} doOnNext map: {}", taskName, data));
+    }
+}
+```
+
+```
+23:12:20.433 [single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task1 doOnNext filter: 5
+23:12:20.436 [single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task1 doOnNext map: 50
+23:12:20.436 [single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 50
+23:12:20.436 [single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task1 doOnNext filter: 7
+23:12:20.436 [single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task1 doOnNext map: 70
+23:12:20.436 [single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 70
+23:12:20.437 [single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task2 doOnNext filter: 5
+23:12:20.437 [single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task2 doOnNext map: 50
+23:12:20.437 [single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 50
+23:12:20.437 [single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task2 doOnNext filter: 7
+23:12:20.437 [single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task2 doOnNext map: 70
+23:12:20.438 [single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 70
+```
+
+doTask 가 두 번 호출되었으나 여전히 하나의 스레드만을 사용하면서 재사용하는 모습을 확인할 수 있음
+
+#### Schedulers.newSingle()
+
+호출할 때마다 매번 새로운 스레드 하나를 생성
+
+```java
+@Slf4j
+public class SchedulerTest {
+    @SneakyThrows
+    @Test
+    void schedulerNewSingle() {
+        doTaskWithNewSingle("task1")
+                .subscribe(data -> log.info("# onNext: {}", data));
+        doTaskWithNewSingle("task2")
+                .subscribe(data -> log.info("# onNext: {}", data));
+
+        Thread.sleep(200L);
+    }
+
+    private static Flux<Integer> doTaskWithNewSingle(String taskName) {
+        return Flux
+                .fromArray(new Integer[]{1, 3, 5, 7})
+                .publishOn(Schedulers.newSingle("new-single", true))
+                .filter(data -> data > 3)
+                .doOnNext(data -> log.info("# {} doOnNext filter: {}", taskName, data))
+                .map(data -> data * 10)
+                .doOnNext(data -> log.info("# {} doOnNext map: {}", taskName, data));
+    }
+}
+```
+
+```
+23:14:32.838 [new-single-2] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task2 doOnNext filter: 5
+23:14:32.838 [new-single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task1 doOnNext filter: 5
+23:14:32.842 [new-single-2] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task2 doOnNext map: 50
+23:14:32.842 [new-single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task1 doOnNext map: 50
+23:14:32.842 [new-single-2] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 50
+23:14:32.842 [new-single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 50
+23:14:32.842 [new-single-2] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task2 doOnNext filter: 7
+23:14:32.842 [new-single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task1 doOnNext filter: 7
+23:14:32.842 [new-single-2] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task2 doOnNext map: 70
+23:14:32.842 [new-single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # task1 doOnNext map: 70
+23:14:32.842 [new-single-2] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 70
+23:14:32.842 [new-single-1] INFO kr.pe.karsei.reactorprac.SchedulerTest -- # onNext: 70
+```
+
+#### Schedulers.boundedElastic()
+
+`ExecutorService` 기반의 스레드 풀을 생성한 후, 그 안에서 정해진 수만큼의 스레드를 사용하여 작업을 처리하고 작업이 종료된 스레드는 반납하여 재사용하는 방식
+
+기본적으로 CPU 코어 수 * 10 만큼의 스레드를 생성하며, 풀에 있는 모든 스레드가 작업을 처리하고 있을 경우 이용 가능한 스레드가 생길 때까지 최대 100,000개의 작업이 큐에서 대기할 수 있음
+
+**Blocking I/O 작업을 효과적으로 처리하기 위한 방식**. 실행 시간이 긴 작업이 포함된 경우, 다른 Non-blocking 처리에 영향을 주지 않도록 전용 스레드를 할당하여 Blocking I/O 작업을 처리
+
+#### Schedulers.parallel()
+
+Schedulers.boundedElastic() 와 다르게 Non-Blocking I/O 에 최적화되어 있고, CPU 코어 수만큼의 스레드 생성
+
+#### Schedulers.fromExecutorService()
+
+기존에 이미 사용하고 있는 `ExecutorService` 가 있다면 이 `ExecutorService` 로부터 Scheduler 를 생성하는 방식
+
+Reactor 에서는 이 방식을 권장하지 않음
+
+#### Schedulers.newXXXX()
+
+스레드 이름, 생성 가능한 디폴트 스레드의 개수, 스레드의 유휴 시간, 데몬 스레드로의 동작 여부 등을 직접 지정하여 커스텀한 스레드 풀을 새로 생성할 수 있음
+
+* Schedulers.newSingle()
+* Schedulers.newBoundedElastic()
+* Schedulers.newParallel()
+
 # References
 * 스프링으로 시작하는 리액티브 프로그래밍 - 황정식 저
 * 패스트캠퍼스 - Reactor
