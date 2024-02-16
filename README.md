@@ -890,6 +890,187 @@ Reactor 에서는 이 방식을 권장하지 않음
 * Schedulers.newBoundedElastic()
 * Schedulers.newParallel()
 
+## Context
+
+어떠한 상황에서 그 상황을 처리하기 위해 필요한 정보
+
+Reactor 의 Context 는 각각의 실행 스레드와 매핑되는 ThreadLocal 과 다르게 Subscriber 와 매핑됨. 즉, 구독이 발생할 때마다 해당 구독과 연결된 하나의 Context 가 생김
+
+Operator 체인 상의 서로 다른 스레드들이 Context의 저장된 데이터에 손쉽게 접근 가능
+
+Context 에 데이터를 쓴 후에는 매번 불변 객체를 다음 `contextWrite()` operator 에 전달함으로써 스레드 안전성을 보장함
+
+* Context 에 데이터 쓰기 - Context API
+* Context 에서 데이터 읽기 - ContextView API
+
+### Context API
+
+자주 사용되는 것들
+
+* put(key, value)
+* of(key1, value1, key2, value2)
+  * 여섯 개 이상의 데이터를 쓰기 위해서는 `putAll` 을 사용해야 함
+* putAll(ContextView)
+* delete(key)
+
+> https://projectreactor.io/docs/core/release/api
+
+```java
+@Slf4j
+public class ContextTest {
+    @SneakyThrows
+    @Test
+    void contextTest() {
+        final String key1 = "company";
+        final String key2 = "firstName";
+        final String key3 = "lastName";
+
+        Mono
+                .deferContextual(ctx ->
+                        Mono.just(ctx.get(key1) + ", " + ctx.get(key2) + " " + ctx.get(key3))
+                )
+                .publishOn(Schedulers.parallel())
+                .contextWrite(ctx -> ctx.putAll(
+                        Context
+                                .of(key2, "Steve" , key3, "Jobs") // Context
+                                .readOnly() // ContextView
+                ))
+                .contextWrite(ctx -> ctx.put(key1, "Apple"))
+                .subscribe(data -> log.info("# onNext: {}", data));
+
+        Thread.sleep(100L);
+    }
+}
+```
+
+```
+22:22:07.239 [parallel-1] INFO kr.pe.karsei.reactorprac.ContextTest -- # onNext: Apple, Steve Jobs
+```
+
+### ContextView
+
+Java Collection 중 `Map`에서 데이터를 읽는 것과 유사
+
+자주 사용되는 것들
+
+* get(key)
+* getOrEmpty(key)
+* getOrDefault(key, default value)
+* hasKey(key)
+* isEmpty()
+* size()
+
+```java
+@Slf4j
+public class ContextTest {
+    @SneakyThrows
+    @Test
+    void contextViewTest() {
+        final String key1 = "company";
+        final String key2 = "firstName";
+        final String key3 = "lastName";
+
+        Mono
+                .deferContextual(ctx ->
+                        Mono.just(
+                                ctx.get(key1) + ", " +
+                                        ctx.getOrEmpty(key2).orElse("no firstName") + " " +
+                                        ctx.getOrDefault(key3, "no lastName"))
+                )
+                .publishOn(Schedulers.parallel())
+                .contextWrite(ctx -> ctx.put(key1, "Apple"))
+                .subscribe(data -> log.info("# onNext: {}", data));
+
+        Thread.sleep(100L);
+    }
+}
+```
+```
+22:31:39.015 [parallel-1] INFO kr.pe.karsei.reactorprac.ContextTest -- # onNext: Apple, no firstName no lastName
+```
+
+### 특징
+
+* 구독이 발생할 때마다 해당하는 **하나의 Context 가 하나의 구독에 연결**된다.
+   * 얼핏 보면 두 개의 데이터가 하나의 Context 에 저장되는 것처럼 보일 수 있으므로 주의
+* Context 는 **Operator 체인의 아래에서 위로 전파**된다.
+* 동일 키에 대한 값을 중복 저장 시 가장 위쪽에 저장한 `contextWrite()` 이 저장한 값으로 덮어쓴다.
+* 인증 정보 같은 직교성(독립성)을 가지는 정보를 전송하는 데 적합함
+
+```java
+@Slf4j
+public class ContextTest {
+    @SneakyThrows
+    @Test
+    void contextConnectTest() {
+        final String key1 = "company";
+
+        Mono<String> mono = Mono
+                .deferContextual(ctx ->
+                        Mono.just("Company: " + " " + ctx.get(key1))
+                )
+                .publishOn(Schedulers.parallel());
+
+        mono
+                .contextWrite(ctx -> ctx.put(key1, "Apple"))
+                .subscribe(data -> log.info("# subscribe1 onNext: {}", data));
+
+        mono
+                .contextWrite(ctx -> ctx.put(key1, "Microsoft"))
+                .subscribe(data -> log.info("# subscribe2 onNext: {}", data));
+
+        Thread.sleep(100L);
+    }
+}
+```
+```
+22:38:41.826 [parallel-1] INFO kr.pe.karsei.reactorprac.ContextTest -- # subscribe1 onNext: Company:  Apple
+22:38:41.826 [parallel-2] INFO kr.pe.karsei.reactorprac.ContextTest -- # subscribe2 onNext: Company:  Microsoft
+```
+
+위 예제에서 구독이 발생할 때마다 context 도 따로 별개로 연결되는 것을 알 수 있다.
+
+```java
+@Slf4j
+public class ContextTest {
+    @SneakyThrows
+    @Test
+    void contextDuplicateTest() {
+        final String key1 = "company";
+        
+        Mono
+                .just("Steve")
+                //.transformDeferredContextual((stringMono, ctx) -> ctx.get("role"))
+                .flatMap(name -> Mono.deferContextual(ctx ->
+                        Mono
+                                .just(ctx.get(key1) + ", " + name)
+                                .transformDeferredContextual((mono, innerCtx) -> 
+                                        mono.map(data -> data + ", " + innerCtx.get("role"))
+                                )
+                                .contextWrite(context -> context.put("role", "CEO"))
+                        )
+                )
+                .publishOn(Schedulers.parallel())
+                .contextWrite(context -> context.put(key1, "Apple"))
+                .subscribe(data -> log.info("# onNext: {}", data));
+        
+        Thread.sleep(100L);
+    }
+}
+```
+```
+23:08:05.309 [parallel-1] INFO kr.pe.karsei.reactorprac.ContextTest -- # onNext: Apple, Steve, CEO
+```
+
+위의 주석을 풀면 아래처럼 오류가 나타난다. `role` 이라는 키가 없기 때문이며 Inner Sequence 외부에서는 Inner Sequence 내부 Context 에 저장된 데이터를 읽을 수 없다.
+
+```
+23:08:51.212 [parallel-1] ERROR reactor.core.publisher.Operators -- Operator called default onErrorDropped
+reactor.core.Exceptions$ErrorCallbackNotImplemented: java.util.NoSuchElementException: Context does not contain key: role
+Caused by: java.util.NoSuchElementException: Context does not contain key: role
+	at reactor.util.context.Context1.get(Context1.java:68)
+```
+
 # References
 * 스프링으로 시작하는 리액티브 프로그래밍 - 황정식 저
 * 패스트캠퍼스 - Reactor
