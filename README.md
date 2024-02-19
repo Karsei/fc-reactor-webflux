@@ -1071,6 +1071,124 @@ Caused by: java.util.NoSuchElementException: Context does not contain key: role
 	at reactor.util.context.Context1.get(Context1.java:68)
 ```
 
+## Debugging
+
+Reactor 는 처리되는 작업들이 대부분 비동기적으로 실행되고, 선언형 프로그래밍 방식으로 구성되므로 디버깅이 쉽지 않다.
+
+### Debug mode 를 활용하는 방법
+
+```java
+@Slf4j
+public class DebugTest {
+    @Test
+    void operatorDebugTest() throws InterruptedException {
+        Map<String, String> fruits = new HashMap<>() {{
+            put("banana", "바나나");
+            put("apple", "사과");
+            put("pear", "배");
+            put("grape", "포도");
+        }};
+
+        //Hooks.onOperatorDebug();
+
+        Flux
+                .fromArray(new String[] {"BANANAS", "APPLES", "PEARS", "MELONS"})
+                .subscribeOn(Schedulers.boundedElastic())
+                .publishOn(Schedulers.parallel())
+                .map(String::toLowerCase)
+                .map(fruit -> fruit.substring(0, fruit.length() - 1))
+                .map(fruits::get)
+                .map(translated -> "맛있는 " + translated)
+                .subscribe(
+                        log::info,
+                        error -> log.error("# onError: ", error)
+                );
+
+        Thread.sleep(100L);
+    }
+}
+```
+```
+23:49:13.323 [parallel-1] INFO kr.pe.karsei.reactorprac.DebugTest -- 맛있는 바나나
+23:49:13.326 [parallel-1] INFO kr.pe.karsei.reactorprac.DebugTest -- 맛있는 사과
+23:49:13.327 [parallel-1] INFO kr.pe.karsei.reactorprac.DebugTest -- 맛있는 배
+23:49:13.329 [parallel-1] ERROR kr.pe.karsei.reactorprac.DebugTest -- # onError: 
+java.lang.NullPointerException: The mapper [kr.pe.karsei.reactorprac.DebugTest$$Lambda$412/0x000002a601194a08] returned a null value.
+```
+
+NPE 오류가 나긴 하지만 정확하게 어떤 부분에서 오류가 났는지 정보가 부족하다.
+
+위 코드에서 주석을 풀고 다시 실행하면 아래처럼 자세하게 나타난다.
+
+```
+23:50:07.785 [parallel-1] INFO kr.pe.karsei.reactorprac.DebugTest -- 맛있는 바나나
+23:50:07.789 [parallel-1] INFO kr.pe.karsei.reactorprac.DebugTest -- 맛있는 사과
+23:50:07.789 [parallel-1] INFO kr.pe.karsei.reactorprac.DebugTest -- 맛있는 배
+23:50:07.793 [parallel-1] ERROR kr.pe.karsei.reactorprac.DebugTest -- # onError: 
+java.lang.NullPointerException: The mapper [kr.pe.karsei.reactorprac.DebugTest$$Lambda$413/0x0000023f1ed952c0] returned a null value.
+	at reactor.core.publisher.FluxMapFuseable$MapFuseableSubscriber.onNext(FluxMapFuseable.java:115)
+	Suppressed: reactor.core.publisher.FluxOnAssembly$OnAssemblyException: 
+Assembly trace from producer [reactor.core.publisher.FluxMapFuseable] :
+	reactor.core.publisher.Flux.map(Flux.java:6517)
+	kr.pe.karsei.reactorprac.DebugTest.operatorDebugTest(DebugTest.java:31)
+Error has been observed at the following site(s):
+	*__Flux.map ? at kr.pe.karsei.reactorprac.DebugTest.operatorDebugTest(DebugTest.java:31)
+	|_ Flux.map ? at kr.pe.karsei.reactorprac.DebugTest.operatorDebugTest(DebugTest.java:32)
+```
+
+`Hooks.onOperatorDebug()`으로 디버그 모드를 활성화하면 에러가 발생한 지점을 좀 더 명확하게 찾을 수 있다. 그러나 애플리케이션 내에서 비용이 많이 드는 동작 과정을 거치므로 처음부터 디버그 모드를 활성화하는 것은 권장하지 않는다.
+
+> **동작 과정**
+> 1. 애플리케이션 내 모든 operator 의 Stacktrace 를 캡처한다.
+> 2. 오류가 발생하면 캡쳐한 정보를 기반으로 오류가 발생한 Assembly 의 Stacktrace 를 Original Stacktrace 중간에 끼워 넣는다.
+
+### `checkpoint()` operator 활용 
+
+특정 operator 체인 내의 Stacktrace 만 캡처한다.
+
+#### traceback 출력
+
+`checkpoint()`를 사용하면 실제 오류가 발생한 assembly 지점 또는 오류가 전파된 assembly 지점의 traceback 이 추가된다.
+
+```java
+@Slf4j
+public class DebugTest {
+    @Test
+    void tracebackTest() {
+        Flux
+                .just(2, 4, 6, 8)
+                .zipWith(Flux.just(1, 2, 3, 0), (x, y) -> x / y)
+                //.checkpoint()
+                .map(num -> num + 2)
+                .checkpoint()
+                .subscribe(
+                        data -> log.info("# onNext: {}", data),
+                        error -> log.error("# onError: ", error)
+                );
+    }
+}
+```
+```
+23:56:24.371 [Test worker] INFO kr.pe.karsei.reactorprac.DebugTest -- # onNext: 4
+23:56:24.375 [Test worker] INFO kr.pe.karsei.reactorprac.DebugTest -- # onNext: 4
+23:56:24.375 [Test worker] INFO kr.pe.karsei.reactorprac.DebugTest -- # onNext: 4
+23:56:24.381 [Test worker] ERROR kr.pe.karsei.reactorprac.DebugTest -- # onError: 
+java.lang.ArithmeticException: / by zero
+	at kr.pe.karsei.reactorprac.DebugTest.lambda$tracebackTest$3(DebugTest.java:45)
+	Suppressed: reactor.core.publisher.FluxOnAssembly$OnAssemblyException: 
+Assembly trace from producer [reactor.core.publisher.FluxMap] :
+	reactor.core.publisher.Flux.checkpoint(Flux.java:3559)
+	kr.pe.karsei.reactorprac.DebugTest.tracebackTest(DebugTest.java:47)
+Error has been observed at the following site(s):
+	*__checkpoint() ? at kr.pe.karsei.reactorprac.DebugTest.tracebackTest(DebugTest.java:47)
+Original Stack Trace:
+		at kr.pe.karsei.reactorprac.DebugTest.lambda$tracebackTest$3(DebugTest.java:45)
+```
+
+위에 있는 `checkpoint()` 지점이 오류와 관련이 있음을 알 수 있다. 하나로는 알기 어렵기 때문에 위의 주석을 풀면 `zipWith` 부분에서 오류가 있음을 추정할 수 있다.
+
+`checkpoint(description, forceStackTrace)`를 사용해서 traceback 과 description 모두를 출력할 수도 있다. 
+
 # References
 * 스프링으로 시작하는 리액티브 프로그래밍 - 황정식 저
 * 패스트캠퍼스 - Reactor
