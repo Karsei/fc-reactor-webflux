@@ -1136,7 +1136,7 @@ Error has been observed at the following site(s):
 	|_ Flux.map ? at kr.pe.karsei.reactorprac.DebugTest.operatorDebugTest(DebugTest.java:32)
 ```
 
-`Hooks.onOperatorDebug()`으로 디버그 모드를 활성화하면 에러가 발생한 지점을 좀 더 명확하게 찾을 수 있다. 그러나 애플리케이션 내에서 비용이 많이 드는 동작 과정을 거치므로 처음부터 디버그 모드를 활성화하는 것은 권장하지 않는다.
+`Hooks.onOperatorDebug()`으로 디버그 모드를 활성화하면 에러가 발생한 지점을 좀 더 명확하게 찾을 수 있다. 그러나 애플리케이션 내에서 비용이 많이 드는 동작 과정을 거치므로 처음부터 디버그 모드를 활성화하는 것은 권장되지 않는다.
 
 > **동작 과정**
 > 1. 애플리케이션 내 모든 operator 의 Stacktrace 를 캡처한다.
@@ -1145,8 +1145,6 @@ Error has been observed at the following site(s):
 ### `checkpoint()` operator 활용 
 
 특정 operator 체인 내의 Stacktrace 만 캡처한다.
-
-#### traceback 출력
 
 `checkpoint()`를 사용하면 실제 오류가 발생한 assembly 지점 또는 오류가 전파된 assembly 지점의 traceback 이 추가된다.
 
@@ -1185,7 +1183,7 @@ Original Stack Trace:
 		at kr.pe.karsei.reactorprac.DebugTest.lambda$tracebackTest$3(DebugTest.java:45)
 ```
 
-위에 있는 `checkpoint()` 지점이 오류와 관련이 있음을 알 수 있다. 하나로는 알기 어렵기 때문에 위의 주석을 풀면 `zipWith` 부분에서 오류가 있음을 추정할 수 있다.
+위에 있는 `checkpoint()` 지점이 오류와 관련이 있음을 알 수 있다. 하나로는 알기 어렵기 때문에 위의 주석을 풀면 `zipWith` 부분에서 더 명확하게 오류가 있음을 추정할 수 있다.
 
 `checkpoint(description, forceStackTrace)`를 사용해서 traceback 과 description 모두를 출력할 수도 있다. 
 
