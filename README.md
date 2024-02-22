@@ -1187,6 +1187,77 @@ Original Stack Trace:
 
 `checkpoint(description, forceStackTrace)`를 사용해서 traceback 과 description 모두를 출력할 수도 있다. 
 
+### `log()` operator 활용
+
+에러가 발생한 지점에 단계적으로 접근하며 로그를 분석할 수 있다.
+
+사용 개수에 제한이 없으므로 필요 시 다른 Operator 뒤에 추가해서 Reactor Sequence 의 내부 동작을 좀 더 상세하게 분석하며 디버깅을 할 수 있다.
+
+```java
+@Slf4j
+public class DebugTest {
+    @Test
+    void logTest() {
+        Map<String, String> fruits = new HashMap<>() {{
+            put("banana", "바나나");
+            put("apple", "사과");
+            put("pear", "배");
+            put("grape", "포도");
+        }};
+
+        Flux
+                .fromArray(new String[] {"BANANAS", "APPLES", "PEARS", "MELONS"})
+                .map(String::toLowerCase)
+                .map(fruit -> fruit.substring(0, fruit.length() - 1))
+                .log()
+                // .log("Fruit.Substring", Level.FINE)
+                .map(fruits::get)
+                .subscribe(
+                        log::info,
+                        error -> log.error("# onError: ", error));
+    }
+}
+```
+
+```
+23:20:56.503 [Test worker] INFO reactor.Flux.MapFuseable.1 -- | onSubscribe([Fuseable] FluxMapFuseable.MapFuseableSubscriber)
+23:20:56.507 [Test worker] INFO reactor.Flux.MapFuseable.1 -- | request(unbounded)
+23:20:56.508 [Test worker] INFO reactor.Flux.MapFuseable.1 -- | onNext(banana)
+23:20:56.508 [Test worker] INFO kr.pe.karsei.reactorprac.DebugTest -- 바나나
+23:20:56.508 [Test worker] INFO reactor.Flux.MapFuseable.1 -- | onNext(apple)
+23:20:56.508 [Test worker] INFO kr.pe.karsei.reactorprac.DebugTest -- 사과
+23:20:56.508 [Test worker] INFO reactor.Flux.MapFuseable.1 -- | onNext(pear)
+23:20:56.508 [Test worker] INFO kr.pe.karsei.reactorprac.DebugTest -- 배
+23:20:56.508 [Test worker] INFO reactor.Flux.MapFuseable.1 -- | onNext(melon)
+23:20:56.511 [Test worker] INFO reactor.Flux.MapFuseable.1 -- | cancel()
+23:20:56.511 [Test worker] ERROR kr.pe.karsei.reactorprac.DebugTest -- # onError: 
+java.lang.NullPointerException: The mapper [kr.pe.karsei.reactorprac.DebugTest$$Lambda$403/0x000001e70117ea80] returned a null value.
+    ...
+	at kr.pe.karsei.reactorprac.DebugTest.logTest(DebugTest.java:69)
+```
+
+`log()` 를 사용하면 onSubscribe(), request(), onNext() 같은 Signal 들이 출력된다. 다만, 로그 레벨이 전부 똑같다 보니, 로그 분석을 하기가 쉽지 않다.
+
+여기서 위의 주석을 풀고 다시 실행하면 아래와 같이 출력된다.
+
+```
+23:47:41.623 [Test worker] DEBUG reactor.util.Loggers - Using Slf4j logging framework
+23:47:41.635 [Test worker] DEBUG Fruit.Substring - | onSubscribe([Fuseable] FluxMapFuseable.MapFuseableSubscriber)
+23:47:41.637 [Test worker] DEBUG Fruit.Substring - | request(unbounded)
+23:47:41.638 [Test worker] DEBUG Fruit.Substring - | onNext(banana)
+23:47:41.638 [Test worker] INFO  kr.pe.karsei.reactorprac.DebugTest - 바나나
+23:47:41.639 [Test worker] DEBUG Fruit.Substring - | onNext(apple)
+23:47:41.639 [Test worker] INFO  kr.pe.karsei.reactorprac.DebugTest - 사과
+23:47:41.639 [Test worker] DEBUG Fruit.Substring - | onNext(pear)
+23:47:41.639 [Test worker] INFO  kr.pe.karsei.reactorprac.DebugTest - 배
+23:47:41.639 [Test worker] DEBUG Fruit.Substring - | onNext(melon)
+23:47:41.644 [Test worker] DEBUG Fruit.Substring - | cancel()
+23:47:41.645 [Test worker] ERROR kr.pe.karsei.reactorprac.DebugTest - # onError: 
+java.lang.NullPointerException: The mapper [kr.pe.karsei.reactorprac.DebugTest$$Lambda$480/0x000001bb9a5dd230] returned a null value.
+	...
+	at kr.pe.karsei.reactorprac.DebugTest.logTest(DebugTest.java:71)
+```
+
 # References
 * 스프링으로 시작하는 리액티브 프로그래밍 - 황정식 저
 * 패스트캠퍼스 - Reactor
