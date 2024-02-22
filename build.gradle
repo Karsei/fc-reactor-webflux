@@ -35,6 +35,7 @@ dependencies {
 
     // Reactor
     //implementation 'io.projectreactor:reactor-core'
+    testImplementation 'io.projectreactor:reactor-test'
 
     // Test
     //testImplementation platform('org.junit:junit-bom:5.9.1')
