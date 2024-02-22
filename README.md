@@ -1258,6 +1258,37 @@ java.lang.NullPointerException: The mapper [kr.pe.karsei.reactorprac.DebugTest$$
 	at kr.pe.karsei.reactorprac.DebugTest.logTest(DebugTest.java:71)
 ```
 
+## Testing
+
+Reactor 에서 제일 일반적인 테스트 방식은 Flux 또는 Mono 를 Reactor Sequence 로 정의한 후, 구독 시점에 해당 operator 체인이 시나리오대로 동작하는지를 테스트한다.
+
+즉, 다음에 발생한 Signal 이 무엇인지, 기대하던 데이터들이 Emit 되었는지, 특정 시간 동안 emit 된 데이터가 있는지 등을 단계적으로 테스트할 수 있다.
+
+### StepVerifier
+
+```java
+@Slf4j
+public class TestingTest {
+    @Test
+    void testWithStepVerifier() {
+        StepVerifier
+                .create(Mono.just("Hello Reactor")) // 테스트 대상 Sequence 생성
+                .expectNext("Hello Reactor") // emit 된 데이터 기댓값 평가
+                //.expectNext("Helo Reactor") // emit 된 데이터 기댓값 평가
+                .expectComplete() // onComplete Signal 기댓값 평가
+                .verify(); // 검증 실행
+    }
+}
+```
+
+만약, 위에서 주석에 있는 것으로 대신 실행하면 아래와 같이 테스트가 실패한다.
+
+```
+java.lang.AssertionError: expectation "expectNext(Helo Reactor)" failed (expected value: Helo Reactor; actual value: Hello Reactor)
+	...
+	at kr.pe.karsei.reactorprac.TestingTest.testWithStepVerifier(TestingTest.java:17)
+```
+
 # References
 * 스프링으로 시작하는 리액티브 프로그래밍 - 황정식 저
 * 패스트캠퍼스 - Reactor
