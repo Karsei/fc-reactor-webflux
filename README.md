@@ -1339,6 +1339,21 @@ public class TestingTest {
                 .expectError()
                 .verify();
     }
+
+    @Test
+    void testWithStepVerifier3() {
+        Flux<Integer> source = Flux.range(0, 1000);
+        StepVerifier
+                .create(GeneralTestExample.takeNumber(source, 500),
+                        StepVerifierOptions.create().scenarioName("Verify from 0 to 499") // 테스트에 실패할 경우, 파라미터로 입력한 시나리오 명을 출력
+                )
+                .expectSubscription()
+                .expectNext(0)
+                .expectNextCount(498)
+                .expectNext(500) // 500개이지만 0부터 시작하므로 500이 되는 일은 없음 (499까지). 따라서 실패함
+                .expectComplete()
+                .verify();
+    }
     
     public static class GeneralTestExample {
         public static Flux<String> sayHello() {
