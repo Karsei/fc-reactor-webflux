@@ -1266,6 +1266,8 @@ Reactor 에서 제일 일반적인 테스트 방식은 Flux 또는 Mono 를 Reac
 
 ### StepVerifier
 
+가장 기본적인 테스트 방식은 Reactor Sequence 에서 발생하는 Signal 이벤트를 테스트하는 것
+
 ```java
 @Slf4j
 public class TestingTest {
@@ -1288,6 +1290,24 @@ java.lang.AssertionError: expectation "expectNext(Helo Reactor)" failed (expecte
 	...
 	at kr.pe.karsei.reactorprac.TestingTest.testWithStepVerifier(TestingTest.java:17)
 ```
+
+#### expect 관련 메서드
+
+* expectSubscription() - 구독이 이루어짐을 기대한다.
+* expectNext(T t) - onNext Signal 을 통해 전달되는 값이 파라미터로 전달된 값과 같음을 기대한다.
+* expectComplete() - onComplete Signal 이 전송되기를 기대한다.
+* expectError() - onError Signal 이 전송되기를 기대한다.
+* expectNextCount(long count) - 구독 시점 또는 이전 expectNext() 를 통해 기댓값이 평가된 데이터 이후부터 emit 된 수를 기대한다.
+* expectNoEvent(Duration duration) - 주어진 시간 동안 Signal 이벤트가 발생하지 않았음을 기대한다.
+* expectAccessibleContext() - 구독 시점 이후에 Context가 전파되었음을 기대한다.
+* expectNextSequence(Iterable<? extends T> iterable) - emit 된 데이터들이 파라미터로 전달된 iterable의 요소와 매치됨을 기대한다.
+
+#### verify 관련 메서드
+
+* verify() - 검증을 트리거한다.
+* verifyComplete() - 검증을 트리거하고, onComplete Signal 을 기대한다.
+* verifyError() - 검증을 트리거하고, onError Signal 을 기대한다.
+* verifyTimeout(Duration duration) - 검증을 트리거하고, 주어진 시간이 초과되더라도 Publisher 가 종료되지 않음을 기대한다.
 
 # References
 * 스프링으로 시작하는 리액티브 프로그래밍 - 황정식 저
