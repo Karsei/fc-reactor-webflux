@@ -1309,6 +1309,56 @@ java.lang.AssertionError: expectation "expectNext(Helo Reactor)" failed (expecte
 * verifyError() - 검증을 트리거하고, onError Signal 을 기대한다.
 * verifyTimeout(Duration duration) - 검증을 트리거하고, 주어진 시간이 초과되더라도 Publisher 가 종료되지 않음을 기대한다.
 
+```java
+@Slf4j
+public class TestingTest {
+    @Test
+    void testWithStepVerifier1() {
+        StepVerifier
+                .create(GeneralTestExample.sayHello())
+                .expectSubscription()
+                .as("# expect Susbscription")
+                .expectNext("Hi") // 실패함. Hi 가 아니라 Hello 이기 때문
+                .as("# expect Hi")
+                .expectNext("Reactor")
+                .as("# expect Reactor")
+                .verifyComplete();
+    }
+
+    @Test
+    void testWithStepVerifier2() {
+        Flux<Integer> source = Flux.just(2, 4, 6, 8, 10);
+        StepVerifier
+                .create(GeneralTestExample.divideByTwo(source))
+                .expectSubscription()
+                .expectNext(1)
+                .expectNext(2)
+                .expectNext(3)
+                .expectNext(4)
+                //.expectNext(1, 2, 3, 4) // 한 번에 모두 테스트도 가능하다.
+                .expectError()
+                .verify();
+    }
+    
+    public static class GeneralTestExample {
+        public static Flux<String> sayHello() {
+          return Flux
+                  .just("Hello", "Reactor");
+        }
+    
+        public static Flux<Integer> divideByTwo(Flux<Integer> source) {
+          return source
+                  .zipWith(Flux.just(2, 2, 2, 2, 0), (x, y) -> x / y);
+        }
+    
+        public static Flux<Integer> takeNumber(Flux<Integer> source, long n) {
+          return source
+                  .take(n);
+        }
+    }
+}
+```
+
 # References
 * 스프링으로 시작하는 리액티브 프로그래밍 - 황정식 저
 * 패스트캠퍼스 - Reactor
